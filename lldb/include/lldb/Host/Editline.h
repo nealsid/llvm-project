@@ -39,6 +39,7 @@
 #include <vector>
 
 #include "lldb/lldb-private.h"
+#include "llvm/ADT/FunctionExtras.h"
 
 #if defined(_WIN32)
 #include "lldb/Host/windows/editlinewin.h"
