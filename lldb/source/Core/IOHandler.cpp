@@ -17,6 +17,7 @@
 #include "lldb/Core/StreamFile.h"
 #include "lldb/Host/Config.h"
 #include "lldb/Host/File.h"
+#include "lldb/Target/StackFrame.h"
 #include "lldb/Utility/Predicate.h"
 #include "lldb/Utility/ReproducerProvider.h"
 #include "lldb/Utility/Status.h"
@@ -279,6 +280,11 @@ IOHandlerEditline::IOHandlerEditline(
         return this->SuggestionCallback(line);
       });
     }
+
+    m_editline_up->SetPromptCallback([this](Editline *editline) {
+				       return this->PromptCallback(editline);
+				     });
+
     // See if the delegate supports fixing indentation
     const char *indent_chars = delegate.IOHandlerGetFixIndentationCharacters();
     if (indent_chars) {
@@ -458,6 +464,52 @@ void IOHandlerEditline::AutoCompleteCallback(CompletionRequest &request) {
   m_delegate.IOHandlerComplete(*this, request);
 }
 #endif
+
+const char* IOHandlerEditline::PromptCallback(Editline *editline) {
+
+  this->m_prompt_string = this->InterpolatePrompt(this->m_prompt);
+  return this->m_prompt_string.c_str();
+}
+
+#include <iostream>
+const char *errorprompt = "(error) ";
+const char *notarget = "(notarg) ";
+std::stringstream interpolated_prompt;
+const std::string& IOHandlerEditline::InterpolatePrompt(const std::string& prompt_format) {
+
+  TargetSP target = m_debugger.GetSelectedTarget();
+  if (!target) {
+    return notarget;
+  }
+
+  auto exe_ctx = m_debugger.GetCommandInterpreter().GetExecutionContext();
+  auto fp = exe_ctx.GetFrameSP();
+  const SymbolContext* scPtr = nullptr;
+
+  if (fp) {
+    scPtr = &(exe_ctx.GetFrameSP()->GetSymbolContext(eSymbolContextEverything));
+  }
+
+  FormatEntity::Entry root;
+  Status parse_status = FormatEntity::Parse(prompt_format, root);
+
+  StreamString strm;
+  if (parse_status.Success()) {
+    std::cout << "parsed" << std::endl;
+    auto formatted = FormatEntity::Format(root, strm, scPtr, &exe_ctx,
+                                          nullptr, nullptr, false, false);
+    if (formatted) {
+      interpolated_prompt << strm.GetData();
+      std::cout << "formatted: " << interpolated_prompt.str() << std::endl << std::endl;
+      return interpolated_prompt.str();
+    } else {
+      std::cout << "not formatted" << std::endl;
+    }
+  } else {
+    std::cout << "not parsed" << std::endl;
+  }
+  return errorprompt;
+}
 
 const char *IOHandlerEditline::GetPrompt() {
 #if LLDB_ENABLE_LIBEDIT

@@ -105,6 +105,8 @@ using SuggestionCallbackType =
 
 using CompleteCallbackType = llvm::unique_function<void(CompletionRequest &)>;
 
+using PromptCallbackType = llvm::unique_function<const char*(Editline*)>;
+
 /// Status used to decide when and how to start editing another line in
 /// multi-line sessions
 enum class EditorStatus {
@@ -188,6 +190,11 @@ public:
 
   /// Cancel this edit and oblitarate all trace of it
   bool Cancel();
+
+  /// Register a callback to retrieve the prompt.
+  void SetPromptCallback(PromptCallbackType promptCallback) {
+    m_prompt_callback = std::move(promptCallback);
+  }
 
   /// Register a callback for autosuggestion.
   void SetSuggestionCallback(SuggestionCallbackType callback) {
@@ -345,6 +352,8 @@ private:
 
   bool CompleteCharacter(char ch, EditLineGetCharType &out);
 
+  const char* InvokePromptCallback();
+
   void ApplyTerminalSizeChange();
 
 #if LLDB_EDITLINE_USE_WCHAR
@@ -383,8 +392,10 @@ private:
   CompleteCallbackType m_completion_callback;
 
   SuggestionCallbackType m_suggestion_callback;
-
   std::size_t m_previous_autosuggestion_size = 0;
+
+  PromptCallbackType m_prompt_callback;
+
   std::mutex m_output_mutex;
 };
 }

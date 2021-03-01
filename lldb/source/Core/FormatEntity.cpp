@@ -98,6 +98,8 @@ constexpr Definition g_file_child_entries[] = {
 
 constexpr Definition g_frame_child_entries[] = {
     Definition("index", EntryType::FrameIndex),
+    Definition("index-id", EntryType::FrameIndexID),
+    Definition("count", EntryType::FrameCount),
     Definition("pc", EntryType::FrameRegisterPC),
     Definition("fp", EntryType::FrameRegisterFP),
     Definition("sp", EntryType::FrameRegisterSP),
@@ -132,8 +134,9 @@ constexpr Definition g_line_child_entries[] = {
     Definition("end-addr", EntryType::LineEntryEndAddress),
 };
 
-constexpr Definition g_module_child_entries[] = {Entry::DefinitionWithChildren(
-    "file", EntryType::ModuleFile, g_file_child_entries)};
+constexpr Definition g_module_child_entries[] = {
+  Entry::DefinitionWithChildren("file", EntryType::ModuleFile,
+                                g_file_child_entries)};
 
 constexpr Definition g_process_child_entries[] = {
     Definition("id", EntryType::ProcessID),
@@ -150,7 +153,8 @@ constexpr Definition g_var_child_entries[] = {
 constexpr Definition g_thread_child_entries[] = {
     Definition("id", EntryType::ThreadID),
     Definition("protocol_id", EntryType::ThreadProtocolID),
-    Definition("index", EntryType::ThreadIndexID),
+    Definition("index-id", EntryType::ThreadIndexID),
+    Definition("count", EntryType::ThreadCount),
     Entry::DefinitionWithChildren("info", EntryType::ThreadInfo,
                                   g_string_entry),
     Definition("queue", EntryType::ThreadQueue),
@@ -320,6 +324,7 @@ const char *FormatEntity::Entry::TypeToCString(Type t) {
     ENUM_TO_CSTR(ThreadID);
     ENUM_TO_CSTR(ThreadProtocolID);
     ENUM_TO_CSTR(ThreadIndexID);
+    ENUM_TO_CSTR(ThreadCount);
     ENUM_TO_CSTR(ThreadName);
     ENUM_TO_CSTR(ThreadQueue);
     ENUM_TO_CSTR(ThreadStopReason);
@@ -334,6 +339,8 @@ const char *FormatEntity::Entry::TypeToCString(Type t) {
     ENUM_TO_CSTR(File);
     ENUM_TO_CSTR(Lang);
     ENUM_TO_CSTR(FrameIndex);
+    ENUM_TO_CSTR(FrameIndexID);
+    ENUM_TO_CSTR(FrameCount);
     ENUM_TO_CSTR(FrameNoDebug);
     ENUM_TO_CSTR(FrameRegisterPC);
     ENUM_TO_CSTR(FrameRegisterSP);
@@ -1223,6 +1230,19 @@ bool FormatEntity::Format(const Entry &entry, Stream &s,
     }
     return false;
 
+  case Entry::Type::ThreadCount:
+    if (exe_ctx) {
+      if (exe_ctx->HasProcessScope()) {
+        auto thread_count = exe_ctx->GetProcessSP()->GetThreadList().GetSize();
+        const char *format = "%" PRIu32;
+        if (!entry.printf_format.empty())
+          format = entry.printf_format.c_str();
+        s.Printf(format, thread_count);
+        return true;
+      }
+    }
+    return false;
+
   case Entry::Type::ThreadIndexID:
     if (exe_ctx) {
       Thread *thread = exe_ctx->GetThreadPtr();
@@ -1412,7 +1432,33 @@ bool FormatEntity::Format(const Entry &entry, Stream &s,
     }
     return false;
 
-  case Entry::Type::FrameRegisterPC:
+  case Entry::Type::FrameIndexID:
+    if (exe_ctx) {
+      StackFrame *frame = exe_ctx->GetFramePtr();
+      if (frame) {
+        const char *format = "%" PRIu32;
+        if (!entry.printf_format.empty())
+          format = entry.printf_format.c_str();
+        s.Printf(format, frame->GetFrameIndex() + 1);
+        return true;
+      }
+    }
+    return false;
+
+  case Entry::Type::FrameCount:
+    if (exe_ctx) {
+      Thread* thread = exe_ctx->GetThreadPtr();
+      if (thread) {
+        const char *format = "%" PRIu32;
+        if (!entry.printf_format.empty())
+          format = entry.printf_format.c_str();
+        s.Printf(format, thread->GetStackFrameCount());
+        return true;
+      }
+    }
+    return false;
+
+ case Entry::Type::FrameRegisterPC:
     if (exe_ctx) {
       StackFrame *frame = exe_ctx->GetFramePtr();
       if (frame) {
@@ -1553,6 +1599,7 @@ bool FormatEntity::Format(const Entry &entry, Stream &s,
             }
           }
         }
+        return true;
       }
     }
   }

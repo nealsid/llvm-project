@@ -427,6 +427,11 @@ private:
   llvm::Optional<std::string> SuggestionCallback(llvm::StringRef line);
 
   void AutoCompleteCallback(CompletionRequest &request);
+
+  const char* PromptCallback(Editline *editline);
+
+  const std::string& InterpolatePrompt(const std::string& prompt);
+
 #endif
 
 protected:
@@ -445,6 +450,8 @@ protected:
   bool m_editing; // Set to true when fetching a line manually (not using
                   // libedit)
   std::string m_line_buffer;
+
+  std::string m_prompt_string;
 };
 
 // The order of base classes is important. Look at the constructor of
