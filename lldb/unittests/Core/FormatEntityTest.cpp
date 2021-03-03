@@ -56,6 +56,7 @@ TEST(FormatEntityTest, DefinitionConstructionNameTypeData) {
 TEST(FormatEntityTest, DefinitionConstructionNameTypeChildren) {
   Definition d("foo", FormatEntity::Entry::Type::Invalid, 33);
   Definition parent("parent", FormatEntity::Entry::Type::Invalid, 1, &d);
+
   EXPECT_EQ(parent.name, "parent");
   EXPECT_EQ(parent.string, nullptr);
   EXPECT_EQ(parent.type, FormatEntity::Entry::Type::Invalid);

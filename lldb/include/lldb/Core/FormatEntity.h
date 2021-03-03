@@ -108,7 +108,7 @@ public:
       const char *name;
       /// Insert this exact string into the output
       const char *string = nullptr;
-      /// Entry::Type corresponding to this definition.
+      /// The type of the format string (see Type above)
       const Entry::Type type;
       /// Data that is returned as the value of the format string.
       const uint64_t data = 0;
