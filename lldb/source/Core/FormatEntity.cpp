@@ -1553,7 +1553,6 @@ bool FormatEntity::Format(const Entry &entry, Stream &s,
             }
           }
         }
-        return true;
       }
     }
   }
