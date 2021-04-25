@@ -88,7 +88,6 @@ using EditlineGetCharCallbackType = int (*)(::EditLine *editline,
                                             EditLineGetCharType *c);
 using EditlineCommandCallbackType = unsigned char (*)(::EditLine *editline,
                                                       int ch);
-using EditlinePromptCallbackType = const char *(*)(::EditLine *editline);
 
 class EditlineHistory;
 

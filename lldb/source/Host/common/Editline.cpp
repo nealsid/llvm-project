@@ -1130,15 +1130,13 @@ void Editline::ConfigureEditor(bool multiline) {
   el_set(m_editline, EL_EDITOR, "emacs");
 
   if (m_prompt_callback) {
-    el_set(m_editline, EL_PROMPT,
-    	   (EditlinePromptCallbackType)([](EditLine *editline) {
-					  return Editline::InstanceFor(editline)->InvokePromptCallback();
-    					}));
+    el_set(m_editline, EL_PROMPT, [](EditLine *editline) {
+             return Editline::InstanceFor(editline)->InvokePromptCallback();
+           });
   } else {
-    el_set(m_editline, EL_PROMPT,
-	   (EditlinePromptCallbackType)([](EditLine *editline) {
-					  return Editline::InstanceFor(editline)->Prompt();
-					}));
+    el_set(m_editline, EL_PROMPT, [](EditLine *editline) {
+             return Editline::InstanceFor(editline)->Prompt();
+           });
   }
 
   el_wset(m_editline, EL_GETCFN, (EditlineGetCharCallbackType)([](

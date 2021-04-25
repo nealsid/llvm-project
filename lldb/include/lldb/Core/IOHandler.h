@@ -431,7 +431,6 @@ private:
   const char* PromptCallback(Editline *editline);
 
   const std::string& InterpolatePrompt(const std::string& prompt);
-
 #endif
 
 protected:
