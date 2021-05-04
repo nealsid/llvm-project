@@ -354,6 +354,22 @@ private:
   void SetEditLinePromptCallback(EditlinePromptCallbackType callbackFn);
   void SetGetCharacterFunction(EditlineGetCharCallbackType callbackFn);
 
+
+  // Template function that adds a callback to Editline.  The callback
+  // invokes a member function on this class.  The reason it's a
+  // template is because there is a lot of boilerplate in constructing
+  // the lambda and calling into libedit.  The member function pointer
+  // is a non-type template parameter in order for the lambda to be
+  // able to use it without capturing anything (which is required to
+  // pass it to libedit as a callback).
+  template<EditlineCommandMemberFunctionType mFn>
+  void addEditlineCallback(const EditLineCharType* command,
+                           const EditLineCharType* helpText) {
+    el_wset(m_editline, EL_ADDFN, command, helpText, [] (::EditLine* editline, int ch) {
+      return (Editline::InstanceFor(editline)->*mFn)(ch);
+    });
+  }
+
 #if LLDB_EDITLINE_USE_WCHAR
   std::wstring_convert<std::codecvt_utf8<wchar_t>> m_utf8conv;
 #endif
