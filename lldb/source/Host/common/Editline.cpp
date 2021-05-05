@@ -1174,8 +1174,9 @@ void Editline::ConfigureEditor(bool multiline) {
   addEditlineCallback<&Editline::PreviousLineCommand>(
       EditLineConstString("lldb-previous-line"),
       EditLineConstString("Move to previous line"));
-  addEditlineCallback<&Editline::NextLineCommand>(EditLineConstString("lldb-next-line"),
-                                       EditLineConstString("Move to next line"));
+  addEditlineCallback<&Editline::NextLineCommand>(
+      EditLineConstString("lldb-next-line"),
+      EditLineConstString("Move to next line"));
   addEditlineCallback<&Editline::PreviousHistoryCommand>(
       EditLineConstString("lldb-previous-history"),
       EditLineConstString("Move to previous history"));
