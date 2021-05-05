@@ -87,6 +87,8 @@ using EditlineCommandCallbackType = unsigned char (*)(::EditLine *editline,
                                                       int ch);
 using EditlinePromptCallbackType = const char *(*)(::EditLine *editline);
 
+using EditlineCommandMemberFunctionType = unsigned char (Editline::*)(int ch);
+
 class EditlineHistory;
 
 using EditlineHistorySP = std::shared_ptr<EditlineHistory>;
@@ -354,7 +356,6 @@ private:
   void SetEditLinePromptCallback(EditlinePromptCallbackType callbackFn);
   void SetGetCharacterFunction(EditlineGetCharCallbackType callbackFn);
 
-
   // Template function that adds a callback to Editline.  The callback
   // invokes a member function on this class.  The reason it's a
   // template is because there is a lot of boilerplate in constructing
@@ -364,11 +365,7 @@ private:
   // pass it to libedit as a callback).
   template<EditlineCommandMemberFunctionType mFn>
   void addEditlineCallback(const EditLineCharType* command,
-                           const EditLineCharType* helpText) {
-    el_wset(m_editline, EL_ADDFN, command, helpText, [] (::EditLine* editline, int ch) {
-      return (Editline::InstanceFor(editline)->*mFn)(ch);
-    });
-  }
+                           const EditLineCharType* helpText);
 
 #if LLDB_EDITLINE_USE_WCHAR
   std::wstring_convert<std::codecvt_utf8<wchar_t>> m_utf8conv;

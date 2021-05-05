@@ -1158,37 +1158,37 @@ void Editline::ConfigureEditor(bool multiline) {
 
   // Commands used for multiline support, registered whether or not they're
   // used
-  addEditlineCallback<BreakLineCommand>(
+  addEditlineCallback<&Editline::BreakLineCommand>(
       EditLineConstString("lldb-break-line"),
       EditLineConstString("Insert a line break"));
 
-  addEditlineCallback<EndOrAddLineCommand>(
+  addEditlineCallback<&Editline::EndOrAddLineCommand>(
       EditLineConstString("lldb-end-or-add-line"),
       EditLineConstString("End editing or continue when incomplete"));
-  addEditlineCallback<DeleteNextCharCommand>(
+  addEditlineCallback<&Editline::DeleteNextCharCommand>(
       EditLineConstString("lldb-delete-next-char"),
       EditLineConstString("Delete next character"));
-  addEditlineCallback<DeletePreviousCharCommand>(
+  addEditlineCallback<&Editline::DeletePreviousCharCommand>(
       EditLineConstString("lldb-delete-previous-char"),
       EditLineConstString("Delete previous character"));
-  addEditlineCallback<PreviousLineCommand>(
+  addEditlineCallback<&Editline::PreviousLineCommand>(
       EditLineConstString("lldb-previous-line"),
       EditLineConstString("Move to previous line"));
-  addEditlineCallback<NextLineCommand>(EditLineConstString("lldb-next-line"),
+  addEditlineCallback<&Editline::NextLineCommand>(EditLineConstString("lldb-next-line"),
                                        EditLineConstString("Move to next line"));
-  addEditlineCallback<PreviousHistoryCommand>(
+  addEditlineCallback<&Editline::PreviousHistoryCommand>(
       EditLineConstString("lldb-previous-history"),
       EditLineConstString("Move to previous history"));
-  addEditlineCallback<NextHistoryCommand>(
+  addEditlineCallback<&Editline::NextHistoryCommand>(
       EditLineConstString("lldb-next-history"),
       EditLineConstString("Move to next history"));
-  addEditlineCallback<BufferStartCommand>(
+  addEditlineCallback<&Editline::BufferStartCommand>(
       EditLineConstString("lldb-buffer-start"),
       EditLineConstString("Move to start of buffer"));
-  addEditlineCallback<BufferEndCommand>(
+  addEditlineCallback<&Editline::BufferEndCommand>(
       EditLineConstString("lldb-buffer-end"),
       EditLineConstString("Move to end of buffer"));
-  addEditlineCallback<FixIndentationCommand>(
+  addEditlineCallback<&Editline::FixIndentationCommand>(
       EditLineConstString("lldb-fix-indentation"),
       EditLineConstString("Fix line indentation"));
 
@@ -1197,9 +1197,9 @@ void Editline::ConfigureEditor(bool multiline) {
   // bad bug where if you have a bind command that tries to bind to a function
   // name that doesn't exist, it can corrupt the heap and crash your process
   // later.)
-  addEditlineCallback<TabCommand>(EditLineConstString("lldb-complete"),
+  addEditlineCallback<&Editline::TabCommand>(EditLineConstString("lldb-complete"),
                                   EditLineConstString("Invoke completion"));
-  addEditlineCallback<TabCommand>(EditLineConstString("lldb_complete"),
+  addEditlineCallback<&Editline::TabCommand>(EditLineConstString("lldb_complete"),
                                   EditLineConstString("Invoke completion"));
 
   // General bindings we don't mind being overridden
@@ -1208,14 +1208,14 @@ void Editline::ConfigureEditor(bool multiline) {
            NULL); // Cycle through backwards search, entering string
 
     if (m_suggestion_callback) {
-      addEditlineCallback<ApplyAutosuggestCommand>(
+      addEditlineCallback<&Editline::ApplyAutosuggestCommand>(
           EditLineConstString("lldb-apply-complete"),
           EditLineConstString("Adopt autocompletion"));
 
       el_set(m_editline, EL_BIND, "^f", "lldb-apply-complete",
              NULL); // Apply a part that is suggested automatically
 
-      addEditlineCallback<TypedCharacter>(
+      addEditlineCallback<&Editline::TypedCharacter>(
           EditLineConstString("lldb-typed-character"),
           EditLineConstString("Typed character"));
 
@@ -1252,7 +1252,7 @@ void Editline::ConfigureEditor(bool multiline) {
   el_source(m_editline, nullptr);
 
   // Register an internal binding that external developers shouldn't use
-  addEditlineCallback<RevertLineCommand>(
+  addEditlineCallback<&Editline::RevertLineCommand>(
       EditLineConstString("lldb-revert-line"),
       EditLineConstString("Revert line to saved state"));
 
@@ -1532,6 +1532,14 @@ void Editline::PrintAsync(Stream *stream, const char *s, size_t len) {
     DisplayInput();
     MoveCursor(CursorLocation::BlockEnd, CursorLocation::EditingCursor);
   }
+}
+
+template<EditlineCommandMemberFunctionType mFn>
+void Editline::addEditlineCallback(const EditLineCharType* command,
+                                   const EditLineCharType* helpText) {
+  el_wset(m_editline, EL_ADDFN, command, helpText, [] (::EditLine* editline, int ch) {
+    return (Editline::InstanceFor(editline)->*mFn)(ch);
+  });
 }
 
 bool Editline::CompleteCharacter(char ch, EditLineGetCharType &out) {
