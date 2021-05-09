@@ -92,14 +92,6 @@ int setupterm(char *term, int fildes, int *errret);
 
 #endif // #if LLDB_EDITLINE_USE_WCHAR
 
-bool IsOnlySpaces(const EditLineStringType &content) {
-  for (wchar_t ch : content) {
-    if (ch != EditLineCharType(' '))
-      return false;
-  }
-  return true;
-}
-
 static int GetOperation(HistoryOperation op) {
   // The naming used by editline for the history operations is counter
   // intuitive to how it's used in LLDB's editline implementation.
@@ -131,7 +123,6 @@ static int GetOperation(HistoryOperation op) {
   }
   llvm_unreachable("Fully covered switch!");
 }
-
 
 EditLineStringType CombineLines(const std::vector<EditLineStringType> &lines) {
   EditLineStringStreamType combined_stream;
@@ -309,6 +300,10 @@ protected:
   std::string m_path;
 };
 }
+}
+
+auto editlineCommands = {
+  std::make_tuple(EditLineConstString("lldb-complete"), EditLineConstString("Invoke completion"), &Editline::TabCommand, "\t")
 }
 
 // Editline private methods
