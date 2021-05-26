@@ -1064,7 +1064,7 @@ void Editline::SetEditLinePromptCallback(
 }
 
 void Editline::SetGetCharacterFunction(EditlineGetCharCallbackType callbackFn) {
-  el_set(m_editline, EL_GETCFN, callbackFn);
+  el_wset(m_editline, EL_GETCFN, callbackFn);
 }
 
 void Editline::ConfigureEditor(bool multiline) {
