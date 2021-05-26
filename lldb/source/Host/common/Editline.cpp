@@ -7,6 +7,7 @@
 //===----------------------------------------------------------------------===//
 
 #include <climits>
+#include <codecvt>
 #include <iomanip>
 
 #include "lldb/Host/Editline.h"
@@ -107,7 +108,7 @@ static int GetOperation(HistoryOperation op) {
 
 std::string CombineLines(const std::vector<std::string> &lines) {
   std::stringstream combined_stream;
-  for (std::string line : lines) {
+  for (const std::string& line : lines) {
     combined_stream << line.c_str() << "\n";
   }
   return combined_stream.str();
@@ -143,13 +144,10 @@ std::string FixIndentation(const std::string &line,
 }
 
 int GetIndentation(const std::string &line) {
-  int space_count = 0;
-  for (char ch : line) {
-    if (ch != ' ')
-      break;
-    ++space_count;
-  }
-  return space_count;
+  auto firstNonSpace = std::find_if(line.begin(), line.end(), [] (const char ch) {
+    return ch != ' ';
+  });
+  return firstNonSpace - line.begin();
 }
 
 bool IsInputPending(FILE *file) {
@@ -497,7 +495,7 @@ unsigned char Editline::RecallHistory(HistoryOperation op) {
   return CC_NEWLINE;
 }
 
-int Editline::GetCharacter(EditLineGetCharType *c) {
+int Editline::GetCharacter(wchar_t *c) {
   const LineInfo *info = el_line(m_editline);
 
   // Paint a faint version of the desired prompt over the version libedit draws
@@ -553,8 +551,9 @@ int Editline::GetCharacter(EditLineGetCharType *c) {
     }
 
     if (read_count) {
-      if (CompleteCharacter(ch, *c))
+      if (CompleteCharacter(ch, *c)) {
         return 1;
+      }
     } else {
       switch (status) {
       case lldb::eConnectionStatusSuccess: // Success
@@ -1095,7 +1094,7 @@ void Editline::ConfigureEditor(bool multiline) {
   el_set(m_editline, EL_SIGNAL, 0);
   el_set(m_editline, EL_EDITOR, "emacs");
 
-  SetGetCharacterFunction([](EditLine *editline, EditLineGetCharType *c) {
+  SetGetCharacterFunction([](EditLine *editline, wchar_t *c) {
     return Editline::InstanceFor(editline)->GetCharacter(c);
   });
 
@@ -1522,10 +1521,29 @@ void Editline::PrintAsync(Stream *stream, const char *s, size_t len) {
   }
 }
 
-bool Editline::CompleteCharacter(char ch, EditLineGetCharType &out) {
-  if (ch == (char)EOF)
-    return false;
+bool Editline::CompleteCharacter(char ch, wchar_t &out) {
+  std::codecvt_utf8<wchar_t> cvt;
+  llvm::SmallString<4> input;
+  for (;;) {
+    const char *from_next;
+    wchar_t *to_next;
+    std::mbstate_t state = std::mbstate_t();
+    input.push_back(ch);
+    switch (cvt.in(state, input.begin(), input.end(), from_next, &out, &out + 1,
+                   to_next)) {
+    case std::codecvt_base::ok:
+      return out != (int)WEOF;
 
-  out = (unsigned char)ch;
-  return true;
+    case std::codecvt_base::error:
+    case std::codecvt_base::noconv:
+      return false;
+
+    case std::codecvt_base::partial:
+      lldb::ConnectionStatus status;
+      size_t read_count = m_input_connection.Read(&ch, 1, std::chrono::seconds(0), status, nullptr);
+      if (read_count == 0)
+        return false;
+      break;
+    }
+  }
 }

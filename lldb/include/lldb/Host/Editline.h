@@ -57,16 +57,6 @@
 namespace lldb_private {
 namespace line_editor {
 
-//using EditLineStringType = std::string;
-//using EditLineStringStreamType = std::stringstream;
-//using EditLineCharType = char;
-
-// At one point the callback type of el_set getchar callback changed from char
-// to wchar_t. It is not possible to detect differentiate between the two
-// versions exactly, but this is a pretty good approximation and allows us to
-// build against almost any editline version out there.
-using EditLineGetCharType = wchar_t;
-
 using EditlineGetCharCallbackType = int (*)(::EditLine *editline,
                                             wchar_t *c);
 using EditlineCommandCallbackType = unsigned char (*)(::EditLine *editline,
