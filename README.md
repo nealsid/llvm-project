@@ -1,106 +1,53 @@
-# The LLVM Compiler Infrastructure
+# Interpolating format strings in LLDB prompt
 
-This directory and its sub-directories contain source code for LLVM,
-a toolkit for the construction of highly optimized compilers,
-optimizers, and run-time environments.
+This summarizes changes proposed to enabled interpolating format strings in the prompt.
 
-The README briefly describes how to get started with building LLVM.
-For more information on how to contribute to the LLVM project, please
-take a look at the
-[Contributing to LLVM](https://llvm.org/docs/Contributing.html) guide.
+# Feature motivation
 
-## Getting Started with the LLVM System
+Currently there is a very useful ability to specify format strings with placeholders to customize output in a few places:
 
-Taken from https://llvm.org/docs/GettingStarted.html.
+* Backtrace (`settings show thread-format`)
+* Thread stop output (`settings show thread-stop-format`)
+* Frame info (`settings show frame-format`)
+* Frame info for unique backtrace command (`settings show frame-format-unique`)
+* ...
 
-### Overview
+The entire list of available variables & formatting code is [here](lldb/source/Core/FormatEntity.cpp).
 
-Welcome to the LLVM project!
+The proposed feature is to support interpolating a format string specified for the prompt, similar to `PS1` in shells, using the existing infrastructure for defining variables and interpolating format strings.
 
-The LLVM project has multiple components. The core of the project is
-itself called "LLVM". This contains all of the tools, libraries, and header
-files needed to process intermediate representations and converts it into
-object files.  Tools include an assembler, disassembler, bitcode analyzer, and
-bitcode optimizer.  It also contains basic regression tests.
+# Background
 
-C-like languages use the [Clang](http://clang.llvm.org/) front end.  This
-component compiles C, C++, Objective-C, and Objective-C++ code into LLVM bitcode
--- and from there into object files, using LLVM.
+Console I/O is handled via [`IOHandler`](lldb/source/core/IOHandler.cpp), which is an abstract base class.  There are a few different subclasses:
 
-Other components include:
-the [libc++ C++ standard library](https://libcxx.llvm.org),
-the [LLD linker](https://lld.llvm.org), and more.
+* `IOHandlerEditline`, which is the main one, and handles most input, including multiline (e.g. entering a list of commands for execution at a breakpoint) It also contains logic for using EditLine/libedit if it is available and falling back if not.
+* `IOHandlerConfirm` (inherits from `IOHandlerEditline`), which is used for prompting the user for Y/N input and supports things like a default answer if the user just pushes enter. 
+* IOHandlers for the Python interpreter, target I/O, and a few others.  Some pass different `IOHandler::Type` values to the `IOHandlerEditline` constructor, and some are subclasses.
 
-### Getting the Source Code and Building LLVM
+There's also a delegate interface that IOHandler uses to notify of events.  CommandInterpreter implements this interface.
 
-The LLVM Getting Started documentation may be out of date.  The [Clang
-Getting Started](http://clang.llvm.org/get_started.html) page might have more
-accurate information.
+## Flow of user input 
 
-This is an example work-flow and configuration to get and build the LLVM source:
+An `IOHandler` gathers input from the user using standard library routines and provides an output stream for command output when its `Run()` method is called.  Command execution is initiated through the IOHandlerDelegate interface, a primary implementation of which is inside `CommandInterpreter.cpp`, and another implementation is in `SBCommandInterpreter` (difference seems to be SB* is used for API implementation?)
 
-1. Checkout LLVM (including related sub-projects like Clang):
+When `CommandInterpreter::Run` is called (TODO: from where besides SBCommandInterpreter?), it starts the following chain of function calls:
 
-     * ``git clone https://github.com/llvm/llvm-project.git``
+1. `Debugger::StartIOHandlerThread`
+2. `Debugger::RunIOHandlers`
+3. `RunIOHandlers` pushes an IO Handler onto stack, cancels existing top IO handler, and runs the new one
 
-     * Or, on windows, ``git clone --config core.autocrlf=false
-    https://github.com/llvm/llvm-project.git``
+(specifics of managing IO Handler Stack omitted because ~~I don't kno~~ of time constraints)
 
-2. Configure and build LLVM and Clang:
+The stack is used for commands to push a new input handler to read more from the user when this is necessary.  For instance, "quit" will push an IOHandlerConfirm object onto the stack to read the user's confirmation choice.  Commands such as "break command" will push an IOHandlerEditline with the `multiline` parameter set to `true` to read the commands to be executed when that breakpoint is hit.
 
-     * ``cd llvm-project``
+ # Prompt handling
+ 
+When `CommandInterpreter` constructs an `IOHandlerEditline`, it calls `Debugger::GetPrompt()` (on it's instance member of type `Debugger`, not a static method), which retrieves the prompt string from the user settings.  `IOHandlerEditline` stores the prompt locally and also calls into libedit to set the prompt there.  This logic is also how the prompt is retrieved from `IOHandlerEditline`.
 
-     * ``cmake -S llvm -B build -G <generator> [options]``
+## Editline prompt callback support
 
-        Some common build system generators are:
+Editline provides an interface with callbacks for certain scenarios.  Currently LLDB takes advantage of those in a few ways: to tell EditLine when input is done in multiline scenarios (`CommandObjectExpression::IOHandlerIsInputComplete`), to fix indentation for REPL input, for auto suggest, etc.  Editline also provides a facility to return a prompt via a callback that a client provides.  To do this, we can configure the editline instance with a callback for the `EL_PROMPT` parameter to `el_set`. 
 
-        * ``Ninja`` --- for generating [Ninja](https://ninja-build.org)
-          build files. Most llvm developers use Ninja.
-        * ``Unix Makefiles`` --- for generating make-compatible parallel makefiles.
-        * ``Visual Studio`` --- for generating Visual Studio projects and
-          solutions.
-        * ``Xcode`` --- for generating Xcode projects.
+## Proposed changes
 
-        Some Common options:
-
-        * ``-DLLVM_ENABLE_PROJECTS='...'`` --- semicolon-separated list of the LLVM
-          sub-projects you'd like to additionally build. Can include any of: clang,
-          clang-tools-extra, libcxx, libcxxabi, libunwind, lldb, compiler-rt, lld,
-          polly, or debuginfo-tests.
-
-          For example, to build LLVM, Clang, libcxx, and libcxxabi, use
-          ``-DLLVM_ENABLE_PROJECTS="clang;libcxx;libcxxabi"``.
-
-        * ``-DCMAKE_INSTALL_PREFIX=directory`` --- Specify for *directory* the full
-          path name of where you want the LLVM tools and libraries to be installed
-          (default ``/usr/local``).
-
-        * ``-DCMAKE_BUILD_TYPE=type`` --- Valid options for *type* are Debug,
-          Release, RelWithDebInfo, and MinSizeRel. Default is Debug.
-
-        * ``-DLLVM_ENABLE_ASSERTIONS=On`` --- Compile with assertion checks enabled
-          (default is Yes for Debug builds, No for all other build types).
-
-      * ``cmake --build build [-- [options] <target>]`` or your build system specified above
-        directly.
-
-        * The default target (i.e. ``ninja`` or ``make``) will build all of LLVM.
-
-        * The ``check-all`` target (i.e. ``ninja check-all``) will run the
-          regression tests to ensure everything is in working order.
-
-        * CMake will generate targets for each tool and library, and most
-          LLVM sub-projects generate their own ``check-<project>`` target.
-
-        * Running a serial build will be **slow**.  To improve speed, try running a
-          parallel build.  That's done by default in Ninja; for ``make``, use the option
-          ``-j NNN``, where ``NNN`` is the number of parallel jobs, e.g. the number of
-          CPUs you have.
-
-      * For more information see [CMake](https://llvm.org/docs/CMake.html)
-
-Consult the
-[Getting Started with LLVM](https://llvm.org/docs/GettingStarted.html#getting-started-with-llvm)
-page for detailed information on configuring and compiling LLVM. You can visit
-[Directory Layout](https://llvm.org/docs/GettingStarted.html#directory-layout)
-to learn about the layout of the source code tree.
+By calling into the `FormatEntity` class inside either `IOHandler` or `Debugger` when the prompt is retrieved, we can have it contain updated information on the target for every prompt.  We can do this in both any editline callback, as well as in the non-editline case every time the prompt is printed.
