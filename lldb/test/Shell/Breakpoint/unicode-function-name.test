@@ -1,0 +1,11 @@
+# RUN: %build% %p/Inputs/unicode-function-name.c --nodefaultlib -o %t
+# RUN: %lldb -b -s %s %t | FileCheck %s
+
+break set -n Δ
+# CHECK: Breakpoint 1:
+
+run
+# CHECK: Process {{[0-9]+}} stopped
+
+print ΔΔ
+# CHECK: (int) $0 = 5
