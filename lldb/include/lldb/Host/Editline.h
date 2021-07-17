@@ -57,8 +57,7 @@
 namespace lldb_private {
 namespace line_editor {
 
-using EditlineGetCharCallbackType = int (*)(::EditLine *editline,
-                                            wchar_t *c);
+using EditlineGetCharCallbackType = int (*)(::EditLine *editline, wchar_t *c);
 using EditlineCommandCallbackType = unsigned char (*)(::EditLine *editline,
                                                       int ch);
 using EditlinePromptCallbackType = const char *(*)(::EditLine *editline);
@@ -324,8 +323,7 @@ private:
   // verbose to put the editline calls into a function, but it
   // provides type safety, since the editline functions take varargs
   // parameters.
-  void AddFunctionToEditLine(const char *command,
-                             const char *helptext,
+  void AddFunctionToEditLine(const char *command, const char *helptext,
                              EditlineCommandCallbackType callbackFn);
   void SetEditLinePromptCallback(EditlinePromptCallbackType callbackFn);
   void SetGetCharacterFunction(EditlineGetCharCallbackType callbackFn);
