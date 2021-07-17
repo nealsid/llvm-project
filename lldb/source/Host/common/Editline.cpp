@@ -549,9 +549,8 @@ int Editline::GetCharacter(wchar_t *c) {
     }
 
     if (read_count) {
-      if (CompleteCharacter(ch, *c)) {
+      if (CompleteCharacter(ch, *c))
         return 1;
-      }
     } else {
       switch (status) {
       case lldb::eConnectionStatusSuccess: // Success
