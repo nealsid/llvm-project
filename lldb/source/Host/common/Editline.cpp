@@ -1113,7 +1113,7 @@ void Editline::AddFunctionToEditLine(const EditLineCharType *command,
 
 void Editline::SetEditLinePromptCallback(
     EditlinePromptCallbackType callbackFn) {
-  el_wset(m_editline, EL_PROMPT, callbackFn);
+  el_set(m_editline, EL_PROMPT, callbackFn);
 }
 
 void Editline::SetGetCharacterFunction(EditlineGetCharCallbackType callbackFn) {
