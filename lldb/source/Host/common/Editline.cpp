@@ -302,9 +302,9 @@ protected:
 }
 }
 
-auto editlineCommands = {
-  std::make_tuple(EditLineConstString("lldb-complete"), EditLineConstString("Invoke completion"), &Editline::TabCommand, "\t")
-}
+// auto editlineCommands = {
+//   std::make_tuple(EditLineConstString("lldb-complete"), EditLineConstString("Invoke completion"), &Editline::TabCommand, "\t")
+// }
 
 // Editline private methods
 
