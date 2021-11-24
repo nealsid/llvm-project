@@ -310,10 +310,6 @@ protected:
 }
 }
 
-// auto editlineCommands = {
-//   std::make_tuple(EditLineConstString("lldb-complete"), EditLineConstString("Invoke completion"), &Editline::TabCommand, "\t")
-// }
-
 // Editline private methods
 
 void Editline::SetBaseLineNumber(int line_number) {
