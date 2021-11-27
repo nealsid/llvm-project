@@ -47,6 +47,7 @@
 #include <csignal>
 #include <mutex>
 #include <string>
+#include <tuple>
 #include <vector>
 
 #include "lldb/Host/ConnectionFileDescriptor.h"
@@ -65,11 +66,38 @@ namespace line_editor {
 using EditLineStringType = std::wstring;
 using EditLineStringStreamType = std::wstringstream;
 using EditLineCharType = wchar_t;
+
+#define EditLineConstString(str) L##str
+#define EditLineStringFormatSpec "%ls"
+
 #else
 using EditLineStringType = std::string;
 using EditLineStringStreamType = std::stringstream;
 using EditLineCharType = char;
-#endif
+
+#define EditLineConstString(str) str
+#define EditLineStringFormatSpec "%s"
+
+// use #defines so wide version functions and structs will resolve to old
+// versions for case of libedit not built with wide char support
+#define history_w history
+#define history_winit history_init
+#define history_wend history_end
+#define HistoryW History
+#define HistEventW HistEvent
+#define LineInfoW LineInfo
+
+#define el_wgets el_gets
+#define el_wgetc el_getc
+#define el_wpush el_push
+#define el_wparse el_parse
+#define el_wset el_set
+#define el_wget el_get
+#define el_wline el_line
+#define el_winsertstr el_insertstr
+#define el_wdeletestr el_deletestr
+
+#endif  // #if LLDB_EDITLINE_USE_WCHAR
 
 // At one point the callback type of el_set getchar callback changed from char
 // to wchar_t. It is not possible to detect differentiate between the two
@@ -406,6 +434,12 @@ private:
 
   std::size_t m_previous_autosuggestion_size = 0;
   std::mutex m_output_mutex;
+
+  // Commands used for multiline support, registered whether or not they're
+  // used
+  static const std::tuple<const EditLineCharType*,
+                          const EditLineCharType*,
+                          EditlineCommandCallbackType> editlineCommandTuples[];
 };
 }
 
