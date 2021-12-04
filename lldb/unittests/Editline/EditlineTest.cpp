@@ -28,7 +28,10 @@
 #include "lldb/Utility/Status.h"
 #include "lldb/Utility/StringList.h"
 
+#define ESCAPE "\x1b"
+
 using namespace lldb_private;
+using namespace testing;
 
 namespace {
 const size_t TIMEOUT_MILLIS = 5000;
@@ -80,6 +83,8 @@ public:
 
   void ConsumeAllOutput();
 
+  const std::string GetEditlineOutput();
+
 private:
   bool IsInputComplete(lldb_private::Editline *editline,
                        lldb_private::StringList &lines);
@@ -91,6 +96,7 @@ private:
   int _pty_secondary_fd;
 
   std::unique_ptr<FilePointer> _el_secondary_file;
+  std::stringstream testOutputBuffer;
 };
 
 EditlineAdapter::EditlineAdapter()
@@ -110,10 +116,20 @@ EditlineAdapter::EditlineAdapter()
   EXPECT_THAT_ERROR(_pty.OpenSecondary(O_RDWR), llvm::Succeeded());
   _pty_secondary_fd = _pty.GetSecondaryFileDescriptor();
 
-  _el_secondary_file.reset(new FilePointer(fdopen(_pty_secondary_fd, "rw")));
+  _el_secondary_file.reset(new FilePointer(fdopen(_pty_secondary_fd, "w+")));
   EXPECT_FALSE(nullptr == *_el_secondary_file);
   if (*_el_secondary_file == nullptr)
     return;
+
+  // We have to set the output stream we pass to Editline as not using
+  // buffered I/O.  Otherwise we are missing editline's output when we
+  // close the stream in the keybinding test (i.e. the EOF comes
+  // before data previously written to the stream by editline).  This
+  // behavior isn't as I understand the spec becuse fclose should
+  // flush the stream, but my best guess is that it's some unexpected
+  // interaction with stream I/O and ptys.
+  EXPECT_EQ(setvbuf(*_el_secondary_file, nullptr, _IONBF, 0), 0)
+      << "Could not set editline output stream to use unbuffered I/O.";
 
   // Create an Editline instance.
   _editline_sp.reset(new lldb_private::Editline(
@@ -204,6 +220,10 @@ bool EditlineAdapter::IsInputComplete(lldb_private::Editline *editline,
   return (start_block_count > 0) && (brace_balance == 0);
 }
 
+const std::string EditlineAdapter::GetEditlineOutput() {
+  return testOutputBuffer.str();
+}
+
 void EditlineAdapter::ConsumeAllOutput() {
   FilePointer output_file(fdopen(_pty_primary_fd, "r"));
 
@@ -229,15 +249,15 @@ void EditlineAdapter::ConsumeAllOutput() {
       break;
     }
     printf("<stdout> 0x%02x (%03d) (%s)\n", ch, ch, display_str);
-// putc(ch, stdout);
 #endif
+    testOutputBuffer << (char)ch;
   }
 }
 
 class EditlineTestFixture : public ::testing::Test {
   SubsystemRAII<FileSystem> subsystems;
   EditlineAdapter _el_adapter;
-  std::shared_ptr<std::thread> _sp_output_thread;
+  std::thread _sp_output_thread;
 
 public:
   static void SetUpTestCase() {
@@ -252,15 +272,16 @@ public:
       return;
 
     // Dump output.
-    _sp_output_thread =
-        std::make_shared<std::thread>([&] { _el_adapter.ConsumeAllOutput(); });
+    _sp_output_thread = std::thread([&] { _el_adapter.ConsumeAllOutput(); });
   }
 
-  void TearDown() override {
+  void EndOutputThread() {
     _el_adapter.CloseInput();
-    if (_sp_output_thread)
-      _sp_output_thread->join();
+    if (_sp_output_thread.joinable())
+      _sp_output_thread.join();
   }
+
+  void TearDown() override { EndOutputThread(); }
 
   EditlineAdapter &GetEditlineAdapter() { return _el_adapter; }
 };
@@ -308,5 +329,125 @@ TEST_F(EditlineTestFixture, EditlineReceivesMultiLineText) {
 
   EXPECT_THAT(reported_lines, testing::ContainerEq(input_lines));
 }
+
+namespace lldb_private {
+
+// Parameter structure for parameterized tests.
+struct KeybindingTestValue {
+  // A number that is used to name the test, so test output can be
+  // mapped back to a specific input.
+  const std::string testNumber;
+  // Whether this keyboard shortcut is only bound in multi-line mode.
+  const bool multilineOnly;
+  // The actual key sequence.
+  const std::string keySequence;
+  // The command the key sequence is supposed to execute.
+  const std::string commandName;
+  // This is initialized to the keySequence by default, but gtest has
+  // some errors when the test name as created by the overloaded
+  // operator<< has embedded newlines.  This is even true when we
+  // specify a custom test name function, as we do below when we
+  // instantiate the test case.  In cases where the keyboard shortcut
+  // has a newline or carriage return, this field in the struct can be
+  // set to something that is printable.
+  const std::string &printableKeySequence = keySequence;
+};
+
+std::ostream &operator<<(std::ostream &os, const KeybindingTestValue &kbtv) {
+  return os << "{" << kbtv.printableKeySequence << "  =>  " << kbtv.commandName
+            << " (multiline only: " << kbtv.multilineOnly << ")}";
+}
+
+// The keyboard shortcuts that we're testing.
+const KeybindingTestValue keySequences[] = {
+    {"1", false, "^w", "ed-delete-prev-word"},
+    {"2", false, "\t", "lldb-complete"},
+    {"3", false, ESCAPE "[1;5C", "em-next-word"},
+    {"4", false, ESCAPE "[1;5D", "ed-prev-word"},
+    {"5", false, ESCAPE "[5C", "em-next-word"},
+    {"6", false, ESCAPE "[5D", "ed-prev-word"},
+    {"7", false, ESCAPE ESCAPE "[C", "em-next-word"},
+    {"8", false, ESCAPE ESCAPE "[D", "ed-prev-word"},
+    {"9", true, "\n", "lldb-end-or-add-line", "<CR>"},
+    {"10", true, "\r", "lldb-end-or-add-line", "<LF>"},
+    {"11", true, ESCAPE "\n", "lldb-break-line", ESCAPE "<CR>"},
+    {"12", true, ESCAPE "\r", "lldb-break-line", ESCAPE "<LF>"},
+    {"13", true, "^p", "lldb-previous-line"},
+    {"14", true, "^n", "lldb-next-line"},
+    {"15", true, "^?", "lldb-delete-previous-char"},
+    {"16", true, "^d", "lldb-delete-next-char"},
+    {"17", true, ESCAPE "[3~", "lldb-delete-next-char"},
+    {"18", true, ESCAPE "[\\^", "lldb-revert-line"},
+    {"19", true, ESCAPE "<", "lldb-buffer-start"},
+    {"20", true, ESCAPE ">", "lldb-buffer-end"},
+    {"21", true, ESCAPE "[A", "lldb-previous-line"},
+    {"22", true, ESCAPE "[B", "lldb-next-line"},
+    {"23", true, ESCAPE ESCAPE "[A", "lldb-previous-history"},
+    {"24", true, ESCAPE ESCAPE "[B", "lldb-next-history"},
+    {"25", true, ESCAPE "[1;3A", "lldb-previous-history"},
+    {"26", true, ESCAPE "[1;3B", "lldb-next-history"},
+};
+
+class EditlineKeyboardBindingTest
+    : public EditlineTestFixture,
+      public testing::WithParamInterface<KeybindingTestValue> {};
+
+// Helper method to call into libedit to have it output a keyboard
+// shortcut mapping.
+void retrieveEditlineShortcutKey(::EditLine *el,
+                                 const std::string &keySequence) {
+  ASSERT_EQ(el_set(el, EL_BIND, keySequence.c_str(), nullptr), 0)
+      << "Retrieving editline keybinding failed for " << keySequence;
+}
+
+// Test cases for editline in single-line mode.
+TEST_P(EditlineKeyboardBindingTest, SingleLineEditlineKeybindings) {
+  KeybindingTestValue kbtv = GetParam();
+
+  auto &editLine = GetEditlineAdapter().GetEditline();
+
+  editLine.ConfigureEditor(false);
+
+  retrieveEditlineShortcutKey(editLine.m_editline, kbtv.keySequence);
+  EndOutputThread();
+  const std::string output = GetEditlineAdapter().GetEditlineOutput();
+  // If the shortcut key is only in multiline mode, verify that it is
+  // not mapped to the command.  It could still be mapped by default,
+  // so we just check if our command doesn't appear in the output.
+  if (kbtv.multilineOnly) {
+    ASSERT_THAT(output, Not(HasSubstr(kbtv.commandName)))
+        << "Multiline only key was bound in single-line mode.";
+    return;
+  }
+
+  // Otherwise, compare the output to make sure our command is mapped
+  // to the shortcut key.
+  ASSERT_THAT(output, HasSubstr(kbtv.commandName))
+      << "Key sequence was not bound to expected command name.";
+}
+
+// Test cases for editline in multi-line mode.
+TEST_P(EditlineKeyboardBindingTest, MultiLineEditlineKeybindings) {
+  KeybindingTestValue kbtv = GetParam();
+
+  auto &editLine = GetEditlineAdapter().GetEditline();
+
+  editLine.ConfigureEditor(true);
+
+  retrieveEditlineShortcutKey(editLine.m_editline, kbtv.keySequence);
+  EndOutputThread();
+  const std::string output = GetEditlineAdapter().GetEditlineOutput();
+
+  ASSERT_THAT(output, HasSubstr(kbtv.commandName))
+      << "Key sequence was not bound to expected command name.";
+}
+
+INSTANTIATE_TEST_SUITE_P(KeyboardShortcuts, EditlineKeyboardBindingTest,
+                         testing::ValuesIn(keySequences),
+                         [](const TestParamInfo<KeybindingTestValue> &kvb) {
+                           return kvb.param.testNumber;
+                         });
+
+} // namespace lldb_private
 
 #endif

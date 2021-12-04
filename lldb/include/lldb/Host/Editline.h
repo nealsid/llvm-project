@@ -240,11 +240,6 @@ private:
   /// all lines of the current multi-line session.
   int GetPromptWidth();
 
-  /// Returns true if the underlying EditLine session's keybindings are
-  /// Emacs-based, or false if
-  /// they are VI-based.
-  bool IsEmacs();
-
   /// Returns true if the current EditLine buffer contains nothing but spaces,
   /// or is empty.
   bool IsOnlySpaces();
@@ -393,6 +388,9 @@ private:
 
   std::size_t m_previous_autosuggestion_size = 0;
   std::mutex m_output_mutex;
+
+  friend class EditlineKeyboardBindingTest_MultiLineEditlineKeybindings_Test;
+  friend class EditlineKeyboardBindingTest_SingleLineEditlineKeybindings_Test;
 };
 }
 
