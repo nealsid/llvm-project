@@ -354,12 +354,6 @@ void Editline::SetCurrentLine(int line_index) {
 
 int Editline::GetPromptWidth() { return (int)PromptForIndex(0).length(); }
 
-bool Editline::IsEmacs() {
-  const char *editor;
-  el_get(m_editline, EL_EDITOR, &editor);
-  return editor[0] == 'e';
-}
-
 bool Editline::IsOnlySpaces() {
   const LineInfoW *info = el_wline(m_editline);
   for (const EditLineCharType *character = info->buffer;
@@ -1329,36 +1323,15 @@ void Editline::ConfigureEditor(bool multiline) {
     el_set(m_editline, EL_BIND, ESCAPE "[\\^", "lldb-revert-line", NULL);
 
     // Editor-specific bindings
-    if (IsEmacs()) {
-      el_set(m_editline, EL_BIND, ESCAPE "<", "lldb-buffer-start", NULL);
-      el_set(m_editline, EL_BIND, ESCAPE ">", "lldb-buffer-end", NULL);
-      el_set(m_editline, EL_BIND, ESCAPE "[A", "lldb-previous-line", NULL);
-      el_set(m_editline, EL_BIND, ESCAPE "[B", "lldb-next-line", NULL);
-      el_set(m_editline, EL_BIND, ESCAPE ESCAPE "[A", "lldb-previous-history",
-             NULL);
-      el_set(m_editline, EL_BIND, ESCAPE ESCAPE "[B", "lldb-next-history",
-             NULL);
-      el_set(m_editline, EL_BIND, ESCAPE "[1;3A", "lldb-previous-history",
-             NULL);
-      el_set(m_editline, EL_BIND, ESCAPE "[1;3B", "lldb-next-history", NULL);
-    } else {
-      el_set(m_editline, EL_BIND, "^H", "lldb-delete-previous-char", NULL);
-
-      el_set(m_editline, EL_BIND, "-a", ESCAPE "[A", "lldb-previous-line",
-             NULL);
-      el_set(m_editline, EL_BIND, "-a", ESCAPE "[B", "lldb-next-line", NULL);
-      el_set(m_editline, EL_BIND, "-a", "x", "lldb-delete-next-char", NULL);
-      el_set(m_editline, EL_BIND, "-a", "^H", "lldb-delete-previous-char",
-             NULL);
-      el_set(m_editline, EL_BIND, "-a", "^?", "lldb-delete-previous-char",
-             NULL);
-
-      // Escape is absorbed exiting edit mode, so re-register important
-      // sequences without the prefix
-      el_set(m_editline, EL_BIND, "-a", "[A", "lldb-previous-line", NULL);
-      el_set(m_editline, EL_BIND, "-a", "[B", "lldb-next-line", NULL);
-      el_set(m_editline, EL_BIND, "-a", "[\\^", "lldb-revert-line", NULL);
-    }
+    el_set(m_editline, EL_BIND, ESCAPE "<", "lldb-buffer-start", NULL);
+    el_set(m_editline, EL_BIND, ESCAPE ">", "lldb-buffer-end", NULL);
+    el_set(m_editline, EL_BIND, ESCAPE "[A", "lldb-previous-line", NULL);
+    el_set(m_editline, EL_BIND, ESCAPE "[B", "lldb-next-line", NULL);
+    el_set(m_editline, EL_BIND, ESCAPE ESCAPE "[A", "lldb-previous-history",
+           NULL);
+    el_set(m_editline, EL_BIND, ESCAPE ESCAPE "[B", "lldb-next-history", NULL);
+    el_set(m_editline, EL_BIND, ESCAPE "[1;3A", "lldb-previous-history", NULL);
+    el_set(m_editline, EL_BIND, ESCAPE "[1;3B", "lldb-next-history", NULL);
   }
 }
 
