@@ -12,6 +12,12 @@
 
 #define EDITLINE_TEST_DUMP_OUTPUT 0
 
+#if EDITLINE_TEST_DUMP_OUTPUT
+#define DEBUG_PRINT_EDITLINE_OUTPUT(ch) PrintEditlineOutput(ch)
+#else
+#define DEBUG_PRINT_EDITLINE_OUTPUT(...)
+#endif
+
 #include <stdio.h>
 #include <unistd.h>
 
@@ -37,40 +43,40 @@ namespace {
 const size_t TIMEOUT_MILLIS = 5000;
 }
 
-class FilePointer {
+class EditlineTestFixture : public ::testing::Test {
 public:
-  FilePointer() = delete;
-
-  FilePointer(const FilePointer &) = delete;
-
-  FilePointer(FILE *file_p) : _file_p(file_p) {}
-
-  ~FilePointer() {
-    if (_file_p != nullptr) {
-      const int close_result = fclose(_file_p);
-      EXPECT_EQ(0, close_result);
-    }
+  static void SetUpTestCase() {
+    // We need a TERM set properly for editline to work as expected.
+    setenv("TERM", "vt100", 1);
   }
 
-  operator FILE *() { return _file_p; }
+  void SetUp() override;
 
-private:
-  FILE *_file_p;
-};
+protected:
+  // EditLine callback for us to tell whether input is complete or
+  // not.
+  bool IsInputComplete(lldb_private::Editline *editline,
+                       lldb_private::StringList &lines);
 
-/**
- Wraps an Editline class, providing a simple way to feed
- input (as if from the keyboard) and receive output from Editline.
- */
-class EditlineAdapter {
-public:
-  EditlineAdapter();
+  // Helper debug method to escape & print libedit's output.
+  void PrintEditlineOutput(char ch);
 
+  // This is normally executed during test case teardown, but some
+  // cases call it explicitly to ensure that all libeditoutput is read
+  // before verifying it.
+  void EndOutputThread() {
+    CloseInput();
+    if (output_read_thread.joinable())
+      output_read_thread.join();
+  }
+
+  void TearDown() override { EndOutputThread(); }
+
+  // Close the file pointer that libedit outputs to (which is our
+  // input).
   void CloseInput();
 
-  bool IsValid() const { return _editline_sp != nullptr; }
-
-  lldb_private::Editline &GetEditline() { return *_editline_sp; }
+  lldb_private::Editline &GetEditline() { return *_editline_up; }
 
   bool SendLine(const std::string &line);
 
@@ -86,216 +92,36 @@ public:
   const std::string GetEditlineOutput();
 
 private:
-  bool IsInputComplete(lldb_private::Editline *editline,
-                       lldb_private::StringList &lines);
+  // EditLine needs a filesystem for reading the history file.
+  SubsystemRAII<FileSystem> subsystems;
 
-  std::unique_ptr<lldb_private::Editline> _editline_sp;
+  // A thread to read libedit's stdout.
+  std::thread output_read_thread;
+  // The EditLine instance under test.
+  std::unique_ptr<lldb_private::Editline> _editline_up;
 
+  // Pseudoterminal for libedit's stdout.
   PseudoTerminal _pty;
+  // Primary/secondary file descriptors for the pty.
   int _pty_primary_fd;
   int _pty_secondary_fd;
 
-  std::unique_ptr<FilePointer> _el_secondary_file;
+  // A FILE* stream that is passed to libedit for stdout.
+  FILE *_el_secondary_file;
+  // The buffer the thread above stores libedit's output into.
   std::stringstream testOutputBuffer;
-};
-
-EditlineAdapter::EditlineAdapter()
-    : _editline_sp(), _pty(), _pty_primary_fd(-1), _pty_secondary_fd(-1),
-      _el_secondary_file() {
-  lldb_private::Status error;
-
-  // Open the first primary pty available.
-  EXPECT_THAT_ERROR(_pty.OpenFirstAvailablePrimary(O_RDWR), llvm::Succeeded());
-
-  // Grab the primary fd.  This is a file descriptor we will:
-  // (1) write to when we want to send input to editline.
-  // (2) read from when we want to see what editline sends back.
-  _pty_primary_fd = _pty.GetPrimaryFileDescriptor();
-
-  // Open the corresponding secondary pty.
-  EXPECT_THAT_ERROR(_pty.OpenSecondary(O_RDWR), llvm::Succeeded());
-  _pty_secondary_fd = _pty.GetSecondaryFileDescriptor();
-
-  _el_secondary_file.reset(new FilePointer(fdopen(_pty_secondary_fd, "w+")));
-  EXPECT_FALSE(nullptr == *_el_secondary_file);
-  if (*_el_secondary_file == nullptr)
-    return;
-
-  // We have to set the output stream we pass to Editline as not using
-  // buffered I/O.  Otherwise we are missing editline's output when we
-  // close the stream in the keybinding test (i.e. the EOF comes
-  // before data previously written to the stream by editline).  This
-  // behavior isn't as I understand the spec becuse fclose should
-  // flush the stream, but my best guess is that it's some unexpected
-  // interaction with stream I/O and ptys.
-  EXPECT_EQ(setvbuf(*_el_secondary_file, nullptr, _IONBF, 0), 0)
-      << "Could not set editline output stream to use unbuffered I/O.";
-
-  // Create an Editline instance.
-  _editline_sp.reset(new lldb_private::Editline(
-      "gtest editor", *_el_secondary_file, *_el_secondary_file,
-      *_el_secondary_file, false));
-  _editline_sp->SetPrompt("> ");
-
-  // Hookup our input complete callback.
-  auto input_complete_cb = [this](Editline *editline, StringList &lines) {
-    return this->IsInputComplete(editline, lines);
-  };
-  _editline_sp->SetIsInputCompleteCallback(input_complete_cb);
-}
-
-void EditlineAdapter::CloseInput() {
-  if (_el_secondary_file != nullptr)
-    _el_secondary_file.reset(nullptr);
-}
-
-bool EditlineAdapter::SendLine(const std::string &line) {
-  // Ensure we're valid before proceeding.
-  if (!IsValid())
-    return false;
-
-  // Write the line out to the pipe connected to editline's input.
-  ssize_t input_bytes_written =
-      ::write(_pty_primary_fd, line.c_str(),
-              line.length() * sizeof(std::string::value_type));
-
-  const char *eoln = "\n";
-  const size_t eoln_length = strlen(eoln);
-  input_bytes_written =
-      ::write(_pty_primary_fd, eoln, eoln_length * sizeof(char));
-
-  EXPECT_NE(-1, input_bytes_written) << strerror(errno);
-  EXPECT_EQ(eoln_length * sizeof(char), size_t(input_bytes_written));
-  return eoln_length * sizeof(char) == size_t(input_bytes_written);
-}
-
-bool EditlineAdapter::SendLines(const std::vector<std::string> &lines) {
-  for (auto &line : lines) {
-#if EDITLINE_TEST_DUMP_OUTPUT
-    printf("<stdin> sending line \"%s\"\n", line.c_str());
-#endif
-    if (!SendLine(line))
-      return false;
-  }
-  return true;
-}
-
-// We ignore the timeout for now.
-bool EditlineAdapter::GetLine(std::string &line, bool &interrupted,
-                              size_t /* timeout_millis */) {
-  // Ensure we're valid before proceeding.
-  if (!IsValid())
-    return false;
-
-  _editline_sp->GetLine(line, interrupted);
-  return true;
-}
-
-bool EditlineAdapter::GetLines(lldb_private::StringList &lines,
-                               bool &interrupted, size_t /* timeout_millis */) {
-  // Ensure we're valid before proceeding.
-  if (!IsValid())
-    return false;
-
-  _editline_sp->GetLines(1, lines, interrupted);
-  return true;
-}
-
-bool EditlineAdapter::IsInputComplete(lldb_private::Editline *editline,
-                                      lldb_private::StringList &lines) {
-  // We'll call ourselves complete if we've received a balanced set of braces.
-  int start_block_count = 0;
-  int brace_balance = 0;
-
-  for (const std::string &line : lines) {
-    for (auto ch : line) {
-      if (ch == '{') {
-        ++start_block_count;
-        ++brace_balance;
-      } else if (ch == '}')
-        --brace_balance;
-    }
-  }
-
-  return (start_block_count > 0) && (brace_balance == 0);
-}
-
-const std::string EditlineAdapter::GetEditlineOutput() {
-  return testOutputBuffer.str();
-}
-
-void EditlineAdapter::ConsumeAllOutput() {
-  FilePointer output_file(fdopen(_pty_primary_fd, "r"));
-
-  int ch;
-  while ((ch = fgetc(output_file)) != EOF) {
-#if EDITLINE_TEST_DUMP_OUTPUT
-    char display_str[] = {0, 0, 0};
-    switch (ch) {
-    case '\t':
-      display_str[0] = '\\';
-      display_str[1] = 't';
-      break;
-    case '\n':
-      display_str[0] = '\\';
-      display_str[1] = 'n';
-      break;
-    case '\r':
-      display_str[0] = '\\';
-      display_str[1] = 'r';
-      break;
-    default:
-      display_str[0] = ch;
-      break;
-    }
-    printf("<stdout> 0x%02x (%03d) (%s)\n", ch, ch, display_str);
-#endif
-    testOutputBuffer << (char)ch;
-  }
-}
-
-class EditlineTestFixture : public ::testing::Test {
-  SubsystemRAII<FileSystem> subsystems;
-  EditlineAdapter _el_adapter;
-  std::thread _sp_output_thread;
-
-public:
-  static void SetUpTestCase() {
-    // We need a TERM set properly for editline to work as expected.
-    setenv("TERM", "vt100", 1);
-  }
-
-  void SetUp() override {
-    // Validate the editline adapter.
-    EXPECT_TRUE(_el_adapter.IsValid());
-    if (!_el_adapter.IsValid())
-      return;
-
-    // Dump output.
-    _sp_output_thread = std::thread([&] { _el_adapter.ConsumeAllOutput(); });
-  }
-
-  void EndOutputThread() {
-    _el_adapter.CloseInput();
-    if (_sp_output_thread.joinable())
-      _sp_output_thread.join();
-  }
-
-  void TearDown() override { EndOutputThread(); }
-
-  EditlineAdapter &GetEditlineAdapter() { return _el_adapter; }
 };
 
 TEST_F(EditlineTestFixture, EditlineReceivesSingleLineText) {
   // Send it some text via our virtual keyboard.
   const std::string input_text("Hello, world");
-  EXPECT_TRUE(GetEditlineAdapter().SendLine(input_text));
+  EXPECT_TRUE(SendLine(input_text));
 
   // Verify editline sees what we put in.
   std::string el_reported_line;
   bool input_interrupted = false;
-  const bool received_line = GetEditlineAdapter().GetLine(
-      el_reported_line, input_interrupted, TIMEOUT_MILLIS);
+  const bool received_line =
+      GetLine(el_reported_line, input_interrupted, TIMEOUT_MILLIS);
 
   EXPECT_TRUE(received_line);
   EXPECT_FALSE(input_interrupted);
@@ -311,14 +137,13 @@ TEST_F(EditlineTestFixture, EditlineReceivesMultiLineText) {
   input_lines.push_back("}");
   input_lines.push_back("");
 
-  EXPECT_TRUE(GetEditlineAdapter().SendLines(input_lines));
+  EXPECT_TRUE(SendLines(input_lines));
 
   // Verify editline sees what we put in.
   lldb_private::StringList el_reported_lines;
   bool input_interrupted = false;
 
-  EXPECT_TRUE(GetEditlineAdapter().GetLines(el_reported_lines,
-                                            input_interrupted, TIMEOUT_MILLIS));
+  EXPECT_TRUE(GetLines(el_reported_lines, input_interrupted, TIMEOUT_MILLIS));
   EXPECT_FALSE(input_interrupted);
 
   // Without any auto indentation support, our output should directly match our
@@ -329,8 +154,6 @@ TEST_F(EditlineTestFixture, EditlineReceivesMultiLineText) {
 
   EXPECT_THAT(reported_lines, testing::ContainerEq(input_lines));
 }
-
-namespace lldb_private {
 
 // Parameter structure for parameterized tests.
 struct KeybindingTestValue {
@@ -400,17 +223,22 @@ void retrieveEditlineShortcutKey(::EditLine *el,
       << "Retrieving editline keybinding failed for " << keySequence;
 }
 
+// We have to put the tests in the lldb_private namespace because
+// they're friend classes of the EditLine class in order to access the
+// libedit member variable.
+namespace lldb_private {
+
 // Test cases for editline in single-line mode.
 TEST_P(EditlineKeyboardBindingTest, SingleLineEditlineKeybindings) {
   KeybindingTestValue kbtv = GetParam();
 
-  auto &editLine = GetEditlineAdapter().GetEditline();
+  auto &editLine = GetEditline();
 
   editLine.ConfigureEditor(false);
 
   retrieveEditlineShortcutKey(editLine.m_editline, kbtv.keySequence);
   EndOutputThread();
-  const std::string output = GetEditlineAdapter().GetEditlineOutput();
+  const std::string output = GetEditlineOutput();
   // If the shortcut key is only in multiline mode, verify that it is
   // not mapped to the command.  It could still be mapped by default,
   // so we just check if our command doesn't appear in the output.
@@ -430,13 +258,13 @@ TEST_P(EditlineKeyboardBindingTest, SingleLineEditlineKeybindings) {
 TEST_P(EditlineKeyboardBindingTest, MultiLineEditlineKeybindings) {
   KeybindingTestValue kbtv = GetParam();
 
-  auto &editLine = GetEditlineAdapter().GetEditline();
+  auto &editLine = GetEditline();
 
   editLine.ConfigureEditor(true);
 
   retrieveEditlineShortcutKey(editLine.m_editline, kbtv.keySequence);
   EndOutputThread();
-  const std::string output = GetEditlineAdapter().GetEditlineOutput();
+  const std::string output = GetEditlineOutput();
 
   ASSERT_THAT(output, HasSubstr(kbtv.commandName))
       << "Key sequence was not bound to expected command name.";
@@ -450,4 +278,151 @@ INSTANTIATE_TEST_SUITE_P(KeyboardShortcuts, EditlineKeyboardBindingTest,
 
 } // namespace lldb_private
 
+void EditlineTestFixture::SetUp() {
+  lldb_private::Status error;
+
+  // Open the first primary pty available.
+  EXPECT_THAT_ERROR(_pty.OpenFirstAvailablePrimary(O_RDWR), llvm::Succeeded());
+
+  // Grab the primary fd.  This is a file descriptor we will:
+  // (1) write to when we want to send input to editline.
+  // (2) read from when we want to see what editline sends back.
+  _pty_primary_fd = _pty.GetPrimaryFileDescriptor();
+
+  // Open the corresponding secondary pty.
+  EXPECT_THAT_ERROR(_pty.OpenSecondary(O_RDWR), llvm::Succeeded());
+  _pty_secondary_fd = _pty.GetSecondaryFileDescriptor();
+
+  _el_secondary_file = fdopen(_pty_secondary_fd, "w+");
+  ASSERT_FALSE(nullptr == _el_secondary_file);
+
+  // We have to set the output stream we pass to Editline as not using
+  // buffered I/O.  Otherwise we are missing editline's output when we
+  // close the stream in the keybinding test (i.e. the EOF comes
+  // before data previously written to the stream by editline).  This
+  // behavior isn't as I understand the spec becuse fclose should
+  // flush the stream, but my best guess is that it's some unexpected
+  // interaction with stream I/O and ptys.
+  EXPECT_EQ(setvbuf(_el_secondary_file, nullptr, _IONBF, 0), 0)
+      << "Could not set editline output stream to use unbuffered I/O.";
+
+  // Create an Editline instance.
+  _editline_up.reset(new lldb_private::Editline(
+      "gtest editor", _el_secondary_file, _el_secondary_file,
+      _el_secondary_file, false));
+  ASSERT_NE(_editline_up.get(), nullptr);
+
+  _editline_up->SetPrompt("> ");
+
+  // Hookup our input complete callback.
+  auto input_complete_cb = [this](Editline *editline, StringList &lines) {
+    return this->IsInputComplete(editline, lines);
+  };
+  _editline_up->SetIsInputCompleteCallback(input_complete_cb);
+
+  // Start a thread that consumes output from libedit.
+  output_read_thread = std::thread([&] { ConsumeAllOutput(); });
+}
+
+bool EditlineTestFixture::IsInputComplete(lldb_private::Editline *editline,
+                                          lldb_private::StringList &lines) {
+  // We'll call ourselves complete if we've received a balanced set of braces.
+  int start_block_count = 0;
+  int brace_balance = 0;
+
+  for (const std::string &line : lines) {
+    for (auto ch : line) {
+      if (ch == '{') {
+        ++start_block_count;
+        ++brace_balance;
+      } else if (ch == '}')
+        --brace_balance;
+    }
+  }
+
+  return (start_block_count > 0) && (brace_balance == 0);
+}
+
+void EditlineTestFixture::CloseInput() {
+  if (_el_secondary_file != nullptr) {
+    // If we don't call release, PseudoTerminal will close the
+    // descriptor again in its destructor.
+    _pty.ReleaseSecondaryFileDescriptor();
+    fclose(_el_secondary_file);
+  }
+}
+
+bool EditlineTestFixture::SendLine(const std::string &line) {
+  // Write the line out to the pipe connected to editline's input.
+  ssize_t input_bytes_written =
+      ::write(_pty_primary_fd, line.c_str(),
+              line.length() * sizeof(std::string::value_type));
+
+  const char *eoln = "\n";
+  const size_t eoln_length = strlen(eoln);
+  input_bytes_written =
+      ::write(_pty_primary_fd, eoln, eoln_length * sizeof(char));
+
+  EXPECT_NE(-1, input_bytes_written) << strerror(errno);
+  EXPECT_EQ(eoln_length * sizeof(char), size_t(input_bytes_written));
+  return eoln_length * sizeof(char) == size_t(input_bytes_written);
+}
+
+bool EditlineTestFixture::SendLines(const std::vector<std::string> &lines) {
+  for (auto &line : lines) {
+#if EDITLINE_TEST_DUMP_OUTPUT
+    printf("<stdin> sending line \"%s\"\n", line.c_str());
 #endif
+    if (!SendLine(line))
+      return false;
+  }
+  return true;
+}
+
+bool EditlineTestFixture::GetLine(std::string &line, bool &interrupted,
+                                  size_t /* timeout_millis */) {
+  return _editline_up->GetLine(line, interrupted);
+}
+
+bool EditlineTestFixture::GetLines(lldb_private::StringList &lines,
+                                   bool &interrupted,
+                                   size_t /* timeout_millis */) {
+  return _editline_up->GetLines(1, lines, interrupted);
+}
+
+const std::string EditlineTestFixture::GetEditlineOutput() {
+  return testOutputBuffer.str();
+}
+
+void EditlineTestFixture::ConsumeAllOutput() {
+  int ch;
+
+  while (read(_pty_primary_fd, &ch, 1) != 0) {
+    DEBUG_PRINT_EDITLINE_OUTPUT(ch);
+    testOutputBuffer << (char)ch;
+  }
+}
+
+void EditlineTestFixture::PrintEditlineOutput(char ch) {
+  char display_str[] = {0, 0, 0};
+  switch (ch) {
+  case '\t':
+    display_str[0] = '\\';
+    display_str[1] = 't';
+    break;
+  case '\n':
+    display_str[0] = '\\';
+    display_str[1] = 'n';
+    break;
+  case '\r':
+    display_str[0] = '\\';
+    display_str[1] = 'r';
+    break;
+  default:
+    display_str[0] = ch;
+    break;
+  }
+  printf("<stdout> 0x%02x (%03d) (%s)\n", ch, ch, display_str);
+}
+
+#endif // #ifdef LLDB_ENABLE_LIBEDIT
