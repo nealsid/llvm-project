@@ -37,3 +37,9 @@ Build command line:
 ```
 $ rm -rf * && cmake -G "Ninja" ../llvm-project/llvm -DLLDB_USE_SYSTEM_DEBUGSERVER=1 -DCMAKE_BUILD_TYPE=RelWithDebInfo -DLLVM_ENABLE_PROJECTS="clang;lldb;libcxx;libcxxabi" && ninja EditlineTests
 ```
+
+Run command line:
+
+```
+$ for a in $(seq 1 10) ; do tools/lldb/unittests/Editline/EditlineTests | grep "54 tests from 2 test suites ran" | cut -f 9 -d " " | tr -d "(" ; done
+```
