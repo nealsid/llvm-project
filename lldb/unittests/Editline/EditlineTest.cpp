@@ -18,6 +18,7 @@
 #include "gmock/gmock.h"
 #include "gtest/gtest.h"
 #include <memory>
+#include <sys/sdt.h>
 #include <thread>
 
 #include "TestingSupport/SubsystemRAII.h"
@@ -27,6 +28,8 @@
 #include "lldb/Host/PseudoTerminal.h"
 #include "lldb/Utility/Status.h"
 #include "lldb/Utility/StringList.h"
+
+#include "EditlineTest.h"
 
 using namespace lldb_private;
 
@@ -241,11 +244,14 @@ class EditlineTestFixture : public ::testing::Test {
 
 public:
   static void SetUpTestCase() {
+    EDITLINETEST_TESTSUITE_SETUP_ENTRY();
     // We need a TERM set properly for editline to work as expected.
     setenv("TERM", "vt100", 1);
+    EDITLINETEST_TESTSUITE_SETUP_RETURN();
   }
 
   void SetUp() override {
+    EDITLINETEST_TESTCASE_SETUP_ENTRY();
     // Validate the editline adapter.
     EXPECT_TRUE(_el_adapter.IsValid());
     if (!_el_adapter.IsValid())
@@ -254,18 +260,22 @@ public:
     // Dump output.
     _sp_output_thread =
         std::make_shared<std::thread>([&] { _el_adapter.ConsumeAllOutput(); });
+    EDITLINETEST_TESTCASE_SETUP_RETURN();
   }
 
   void TearDown() override {
+    EDITLINETEST_TESTCASE_TEARDOWN_ENTRY();
     _el_adapter.CloseInput();
     if (_sp_output_thread)
       _sp_output_thread->join();
+    EDITLINETEST_TESTCASE_TEARDOWN_RETURN();
   }
 
   EditlineAdapter &GetEditlineAdapter() { return _el_adapter; }
 };
 
 TEST_F(EditlineTestFixture, EditlineReceivesSingleLineText) {
+  EDITLINETEST_TEST_SINGLELINE_ENTRY();
   // Send it some text via our virtual keyboard.
   const std::string input_text("Hello, world");
   EXPECT_TRUE(GetEditlineAdapter().SendLine(input_text));
@@ -279,9 +289,11 @@ TEST_F(EditlineTestFixture, EditlineReceivesSingleLineText) {
   EXPECT_TRUE(received_line);
   EXPECT_FALSE(input_interrupted);
   EXPECT_EQ(input_text, el_reported_line);
+  EDITLINETEST_TEST_SINGLELINE_RETURN();
 }
 
 TEST_F(EditlineTestFixture, EditlineReceivesMultiLineText) {
+  EDITLINETEST_TEST_MULTILINE_ENTRY("hello");
   // Send it some text via our virtual keyboard.
   std::vector<std::string> input_lines;
   input_lines.push_back("int foo()");
@@ -307,6 +319,7 @@ TEST_F(EditlineTestFixture, EditlineReceivesMultiLineText) {
     reported_lines.push_back(line);
 
   EXPECT_THAT(reported_lines, testing::ContainerEq(input_lines));
+  EDITLINETEST_TEST_MULTILINE_RETURN("hello");
 }
 
 #endif
