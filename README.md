@@ -19,7 +19,9 @@ I think there's more useful information to be gotten from the performance counte
 
 ![Chart showing performance with/without history](chart.png)
 
-I spent some time investigating how history was/wasn't used.  It is always enabled in Editline initialization, but can be turned off.  In fact, for unit tests, the slowdown with history can worsen over time, because the test cases read/write to the user's home directory, and that history file grows each time the test cases are run.
+I spent some time investigating how history was/wasn't used.  It is always enabled in Editline initialization, but can be turned off.  In fact, for unit tests, the slowdown with history can worsen over time, because the test cases read/write to the user's home directory, and that history file grows each time the test cases are run.  
+
+In production code, Editline is initialized and destroyed many times over a debugging session.  History is not always needed, and the user's history file for real usage is likely to be large enough that eliminating its read/write will be a worthwhile optimization, even though the number of setup/teardown calls will be much less than in this analysis. 
 
 Machine/build info
 
