@@ -15,7 +15,7 @@ $ ninja EditlineTests && sudo dtrace -c tools/lldb/unittests/Editline/EditlineTe
     -s ../llvm-project/lldb/unittests/Editline/EditlinePerf.d
 ```
 
-I think there's more useful information to be gotten from the performance counters available through Instruments.  For instance, by looking at the number of cycles with outstanding L1 cache misses, it was clear that a great deal of time was spent in the EditlineAdapter destructor, which I traced to the command history loading/saving (from a file in the user's home directory).  Removing this from unit tests, which it isn't necessary for, gave a nice speedup (FYI, this perf comparison was done with tests in a pending patch that are not in the main tree, but the setup/teardown code is the same.  The effect of the extrat tests is to amplify the costs of setup/teardown by performing them more times):
+I think there's more useful information to be gotten from the performance counters available through Instruments.  For instance, by looking at the number of cycles with outstanding L1 cache misses, it was clear that a great deal of time was spent in the EditlineAdapter destructor, which I traced to the command history loading/saving (from a file in the user's home directory).  Removing this from unit tests, which it isn't necessary for, gave a nice speedup (FYI, this perf comparison was done with tests in a pending patch that are not in the main tree, but the setup/teardown code is the same.  The effect of the extra tests is to amplify the costs of setup/teardown by performing them more times):
 
 ![Chart showing performance with/without history](chart.png)
 
